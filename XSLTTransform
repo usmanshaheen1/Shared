@@ -1,0 +1,115 @@
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.Azure.WebJobs.Host;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.File;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Web.Http;
+using System.Xml;
+using System.Xml.Xsl;
+
+namespace Common.Function
+{
+    public class Transform : ApiController
+    {
+        [FunctionName("Transform")]
+        
+        public static async Task<HttpResponseMessage> Run([HttpTrigger(AuthorizationLevel.Function, "post")]HttpRequestMessage Request,
+            TraceWriter log)
+        {
+            try
+            {
+                var requestMessage = Request.Content.ReadAsStringAsync().Result;
+
+                JObject JsonMsg = JObject.Parse(requestMessage);
+                var mapName = JsonMsg.GetValue("MapName").Value<string>();
+
+                var MsgString = JsonMsg.GetValue("DocString").Value<string>();
+
+                string transformResult = XslTransform(MsgString, mapName);
+                return Request.CreateResponse(HttpStatusCode.OK, transformResult);
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex.Message, ex, "Transform Azure Function");
+                return Request.CreateErrorResponse(HttpStatusCode.InternalServerError, ex);
+            }
+        }
+
+        static Transform()
+        {
+            LoadXsltMaps();
+        }
+        
+         static Dictionary<string, XslCompiledTransform> xslList = new Dictionary<string, XslCompiledTransform>();
+        static void LoadXsltMaps()
+        {
+
+            CloudStorageAccount storageAccount = CloudStorageAccount.Parse(ConfigurationManager.AppSettings["FilesStorageConnectionString"]);
+            // Create a CloudFileClient object for credentialed access to File storage.
+            CloudFileClient fileClient = storageAccount.CreateCloudFileClient();
+            // Get a reference to the file share we created previously.
+            CloudFileShare share = fileClient.GetShareReference(ConfigurationManager.AppSettings["FileShareName"]);
+
+            // Get a reference to the root directory for the share.
+            var xsltFiles = share.GetRootDirectoryReference().GetDirectoryReference(ConfigurationManager.AppSettings["MapsFolder"])
+                            .ListFilesAndDirectories().OfType<CloudFile>();
+
+
+            foreach (var file in xsltFiles)
+            {
+
+                string transformXSL;
+                using (var stream = file.OpenRead())
+                {
+                    using (var reader = new StreamReader(stream))
+                    {
+                        transformXSL = reader.ReadToEnd();
+                    }
+                }
+                
+                XslCompiledTransform compiledTrx = new XslCompiledTransform();
+
+                using (StringReader sr = new StringReader(transformXSL))
+                {
+                    using (XmlReader xr = XmlReader.Create(sr))
+                    {
+                        XsltSettings xsltSettings = new XsltSettings(true, true);
+                        compiledTrx.Load(xr, xsltSettings, null);
+                    }
+                }
+
+                xslList.Add(file.Uri.Segments[3], compiledTrx);
+
+            }
+        }
+         static string XslTransform(string inputXML, string mapName)
+        {
+            string resultXML;
+            XslCompiledTransform transform = xslList[mapName];
+
+            using (StringReader sr = new StringReader(inputXML))
+            {
+                using (XmlReader xr = XmlReader.Create(sr))
+                {
+                    using (StringWriter sw = new StringWriter())
+                    {
+                        transform.Transform(xr, null, sw);
+                        return resultXML = sw.ToString();
+                    }
+                }
+            }
+        }
+
+
+    }
+
+}
