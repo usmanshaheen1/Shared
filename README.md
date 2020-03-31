@@ -15,3 +15,6 @@ ASP.NET Standard
 An Azure Function implementation to transform XML messages through XSLT transformations. Upload the Maps .xslt to an Azure Blob storage MapsFolder.
 Request: Map Name & XML message
 Response: Transformed XML message  
+
+
+![XSLT Transformation](https://upload.wikimedia.org/wikipedia/commons/e/e6/XSLT_en.svg)
